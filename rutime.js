@@ -1,9 +1,10 @@
 let compiledModulesCache = {};
 let projectFiles = {}; 
+let lastCompiledCode = ''; 
 
 function compileZLang(zCode, fileName) {
     const lines = zCode.split('\n').map(line => line.trim()).filter(line => line.length > 0);
-    let jsOutput = `\n(function() { // ZLang Modülü: ${fileName}\n`;
+    let jsOutput = `\n(function() { // ${fileName}\n`; 
 
     let inJsAddon = false;
     let inHtmlAddon = false;
@@ -36,7 +37,6 @@ function compileZLang(zCode, fileName) {
                         compiledModulesCache[libFileName] = moduleJsCode;
                     }
 
-                    jsOutput += `// Import: ${libFileName}\n`;
                     jsOutput += moduleJsCode;
                 }
             } 
@@ -66,8 +66,31 @@ function compileZLang(zCode, fileName) {
             }
         }
     }
-    jsOutput += `\n})();// ZLang Modülü Bitişi: ${fileName}\n`;
+    jsOutput += `\n})();// ${fileName}\n`;
     return jsOutput;
+}
+
+function Zinstall() {
+    if (!lastCompiledCode) {
+        console.error("HATA: Derleme yapılmadı.");
+        return;
+    }
+
+    const blob = new Blob([lastCompiledCode], {type: 'text/javascript'});
+    const url = URL.createObjectURL(blob);
+    
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'zlang_output.js';
+    a.style.display = 'none';
+    
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    
+    URL.revokeObjectURL(url); 
+    
+    console.log(`'zlang_output.js' indirildi.`);
 }
 
 async function processSelectedFiles(files) {
@@ -104,28 +127,30 @@ async function processSelectedFiles(files) {
     }
 
     if (!mainFileContent) {
-        console.error("HATA: Ana giriş dosyası olan 'main.z' bulunamadı.");
+        console.error("HATA: 'main.z' bulunamadı.");
         return;
     }
 
     try {
         const finalCompiledCode = compileZLang(mainFileContent, 'main.z');
+        lastCompiledCode = finalCompiledCode;
 
         console.log("--- DERLEME BAŞARILI ---");
         console.log("ÇIKTI JS KODU:");
         console.log(finalCompiledCode);
         console.log("--- ÇALIŞTIRMA SONUCU ---");
         eval(finalCompiledCode);
+        
+        console.log("Zinstall() ile indir.");
 
     } catch (error) {
-        console.error("KRİTİK HATA: Proje derlenemedi.");
-        console.error(error.message);
+        console.error("KRİTİK HATA:", error.message);
     }
 }
 
 function startCompiler() {
     console.clear();
-    console.log("Z DİLİ DERLEYİCİSİ BAŞLATILDI: Lütfen açılan pencerede tüm .z dosyalarınızı seçin.");
+    console.log("Z DİLİ DERLEYİCİSİ BAŞLADI.");
 
     const input = document.createElement('input');
     input.type = 'file';
@@ -136,10 +161,10 @@ function startCompiler() {
         const files = event.target.files;
         if (files.length > 0) {
             processSelectedFiles(files);
-        } else {
-            console.warn("Seçim iptal edildi.");
         }
-        document.body.removeChild(input); 
+        try {
+            document.body.removeChild(input);
+        } catch(e) {}
     });
 
     input.style.display = 'none';
@@ -148,3 +173,4 @@ function startCompiler() {
 }
 
 startCompiler();
+
