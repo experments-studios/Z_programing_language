@@ -1,85 +1,63 @@
-// =========================================================
-// ZLANG DERLEYİCİSİ V3.0 - SADECE TARAYICI KONSOLU İÇİN
-// =========================================================
+let compiledModulesCache = {};
+let projectFiles = {}; 
 
-/**
- * Z Dili (ZLang) kodunu JavaScript'e derler.
- * @param {string} zCode - Derlenecek Z Dili kodu.
- * @returns {string} - Oluşturulan JavaScript kodu.
- */
-function compileZLang(zCode) {
+function compileZLang(zCode, fileName) {
     const lines = zCode.split('\n').map(line => line.trim()).filter(line => line.length > 0);
-    let jsOutput = '// Z Dili Derleyici Çıktısı (ZLang to JS)\n\n';
+    let jsOutput = `\n(function() { // ZLang Modülü: ${fileName}\n`;
 
     let inJsAddon = false;
     let inHtmlAddon = false;
 
     for (const line of lines) {
         let jsLine = '';
-
-        // --- ADDON (Eklenti) Kontrolü ---
-        if (line.startsWith('<addon^index/set^js>')) {
-            inJsAddon = true;
-            continue;
-        } else if (line.startsWith('<addon^js>')) {
-            inJsAddon = false;
-            jsOutput += '\n';
-            continue;
-        } else if (inJsAddon) {
-            jsOutput += line + '\n';
-            continue;
-        }
         
-        if (line.startsWith('<addon^index/set^html>')) {
-            inHtmlAddon = true;
-            jsOutput += '/* HTML Eklentisi Başlangıcı:\n';
-            continue;
-        } else if (line.startsWith('<addon^html>')) {
-            inHtmlAddon = false;
-            jsOutput += '*/\n';
-            continue;
-        } else if (inHtmlAddon) {
-            jsOutput += line + '\n';
-            continue;
-        }
-        // --- ADDON Bitişi ---
+        if (line.startsWith('<addon^index/set^js>')) { inJsAddon = true; continue; } 
+        else if (line.startsWith('<addon^js>')) { inJsAddon = false; continue; } 
+        else if (inJsAddon) { jsOutput += line + '\n'; continue; }
+        if (line.startsWith('<addon^index/set^html>')) { inHtmlAddon = true; continue; } 
+        else if (line.startsWith('<addon^html>')) { inHtmlAddon = false; continue; } 
+        else if (inHtmlAddon) { jsOutput += line + '\n'; continue; }
 
         if (!inJsAddon && !inHtmlAddon) {
             
-            const printIndexMatch = line.match(/^<print\^set\.index="([^"]+)">$/);
-            if (printIndexMatch) {
-                jsLine = `console.log("${printIndexMatch[1]}");`;
-            }
-            
-            else if (line.startsWith('<print\^set\.incode=')) {
-                const incodeValue = line.match(/^<print\^set\.incode="([^"]+)">$/);
-                if (incodeValue) {
-                    jsLine = `console.log(${incodeValue[1]});`;
+            if (line.startsWith('<import^z=')) {
+                const importMatch = line.match(/^<import\^z="([^"]+\.z)">$/);
+                if (importMatch) {
+                    const libFileName = importMatch[1];
+                    let moduleJsCode = compiledModulesCache[libFileName];
+
+                    if (!moduleJsCode) {
+                        const moduleZCode = projectFiles[libFileName];
+                        if (!moduleZCode) {
+                            throw new Error(`IMPORT HATA: '${libFileName}' bulunamadı.`);
+                        }
+                        
+                        moduleJsCode = compileZLang(moduleZCode, libFileName);
+                        compiledModulesCache[libFileName] = moduleJsCode;
+                    }
+
+                    jsOutput += `// Import: ${libFileName}\n`;
+                    jsOutput += moduleJsCode;
                 }
-            }
+            } 
             
-            else if (line.startsWith('<set^')) {
+            else {
+                const printIndexMatch = line.match(/^<print\^set\.index="([^"]+)">$/);
+                const incodeValue = line.match(/^<print\^set\.incode="([^"]+)">$/);
                 const setMatch = line.match(/^<set\^(\w+)\s*=\s*(.*)$/);
-                if (setMatch) {
+                
+                if (printIndexMatch) {
+                    jsLine = `console.log("${printIndexMatch[1]}");`;
+                } else if (incodeValue) {
+                    jsLine = `console.log(${incodeValue[1]});`;
+                } else if (setMatch) {
                     const varName = setMatch[1].trim();
                     const value = setMatch[2].trim();
                     jsLine = `let ${varName} = ${value};`;
-                }
-            }
-            
-            else if (line.startsWith('<import^z=')) {
-                const importMatch = line.match(/^<import\^z="([^"]+\.z)">$/);
-                if (importMatch) {
-                    const libName = importMatch[1];
-                    jsLine = `// ZLang Import: ${libName} (Harici modül içe aktarma simülasyonu)`;
-                }
-            }
-            
-            else {
-                if (line.startsWith('//') || line.startsWith('#')) {
-                     jsLine = line; 
+                } else if (line.startsWith('//') || line.startsWith('#')) {
+                    jsLine = line; 
                 } else {
-                     jsLine = `// HATA: Tanınmayan ZLang komutu: ${line}`;
+                    jsLine = `// HATA: ${line}`;
                 }
             }
 
@@ -88,83 +66,85 @@ function compileZLang(zCode) {
             }
         }
     }
-
+    jsOutput += `\n})();// ZLang Modülü Bitişi: ${fileName}\n`;
     return jsOutput;
 }
 
-// =========================================================
-// DERLEME PROSEDÜRÜNÜ BAŞLATAN FONKSİYON
-// (compile << file^commmand simülasyonu)
-// =========================================================
+async function processSelectedFiles(files) {
+    projectFiles = {};
+    compiledModulesCache = {};
+    let mainFileContent = null;
+    let zFileCount = 0;
 
-function startZCompiler() {
-    console.clear();
-    console.log("%c========================================", 'color: blue; font-weight: bold;');
-    console.log("%cZ DİLİ DERLEYİCİSİ BAŞLATILIYOR (Konsol Modu)", 'color: blue; font-weight: bold;');
-    console.log("%c========================================", 'color: blue; font-weight: bold;');
-    console.log("\n-> Z Kodunu okumak için bir dosya seçmeniz gerekmektedir.");
-    console.log("-> Bu, sizin istediğiniz 'compile << file^commmand' komutunun tarayıcıdaki karşılığıdır.");
-
-    // Geçici bir dosya giriş elementi oluştur
-    const input = document.createElement('input');
-    input.type = 'file';
-    input.accept = '.z'; // Sadece .z uzantılı dosyaları kabul et
-
-    // Dosya seçildiğinde çalışacak olay dinleyicisi
-    input.addEventListener('change', (event) => {
-        const file = event.target.files[0];
-
-        if (!file) {
-            console.error("HATA: Dosya seçimi iptal edildi.");
-            return;
-        }
-
-        if (!file.name.endsWith('.z')) {
-            console.error(`HATA: Lütfen bir .z uzantılı dosya seçin. Seçilen: ${file.name}`);
-            return;
-        }
-
-        const reader = new FileReader();
-
-        // Dosya okuma başarılı olduğunda
-        reader.onload = function(e) {
-            const zCode = e.target.result;
+    for (const file of files) {
+        if (file.name.endsWith('.z')) {
+            zFileCount++;
             try {
-                // 1. Derleme işlemini çalıştır
-                const compiledCode = compileZLang(zCode);
+                const content = await new Promise((resolve, reject) => {
+                    const reader = new FileReader();
+                    reader.onload = (e) => resolve(e.target.result);
+                    reader.onerror = reject;
+                    reader.readAsText(file);
+                });
                 
-                // 2. Kullanıcıya derlenmiş JS kodunu ver
-                console.log("\n%c*** DERLEME BAŞARILI! ***", 'color: green; font-weight: bold; font-size: 1.1em;');
-                console.log(`Dosya Adı: ${file.name}`);
-                
-                console.log("\n%c========================================", 'color: purple;');
-                console.log("%cDERLENMİŞ JAVASCRIPT KODU ÇIKTISI (.js)", 'color: purple; font-weight: bold;');
-                console.log("%c(Bu kodu kopyalayıp .js dosyası olarak kaydedebilirsiniz)", 'color: purple;');
-                console.log("%c========================================", 'color: purple;');
-                console.log(compiledCode);
-                console.log("%c========================================\n", 'color: purple;');
-                
-                // 3. (Opsiyonel) Kodu doğrudan çalıştır
-                console.log("\n%c=== DERLENMİŞ KODUN ÇALIŞTIRILMASI SONUCU ===", 'color: #ff9900; font-weight: bold;');
-                eval(compiledCode);
-                console.log("%c==============================================", 'color: #ff9900;');
-
-            } catch (error) {
-                console.error("DERLEME İŞLEMİ SIRASINDA KRİTİK HATA:", error.message);
+                projectFiles[file.name] = content;
+                if (file.name === 'main.z') {
+                    mainFileContent = content;
+                }
+            } catch (e) {
+                console.error(`HATA: ${file.name} okunamadı.`, e);
+                return;
             }
-        };
-        
-        reader.onerror = function() {
-            console.error("HATA: Dosya okuma işlemi başarısız oldu.");
-        };
+        }
+    }
+    
+    if (zFileCount === 0) {
+        console.error("HATA: Hiçbir .z uzantılı dosya seçilmedi.");
+        return;
+    }
 
-        // Dosyayı metin olarak oku
-        reader.readAsText(file);
-    });
+    if (!mainFileContent) {
+        console.error("HATA: Ana giriş dosyası olan 'main.z' bulunamadı.");
+        return;
+    }
 
-    // Dosya seçme penceresini açmak için elementi tıklat
-    input.click(); 
+    try {
+        const finalCompiledCode = compileZLang(mainFileContent, 'main.z');
+
+        console.log("--- DERLEME BAŞARILI ---");
+        console.log("ÇIKTI JS KODU:");
+        console.log(finalCompiledCode);
+        console.log("--- ÇALIŞTIRMA SONUCU ---");
+        eval(finalCompiledCode);
+
+    } catch (error) {
+        console.error("KRİTİK HATA: Proje derlenemedi.");
+        console.error(error.message);
+    }
 }
 
-// Fonksiyonu hemen çalıştır (Konsola yapıştırıldıktan sonra)
-startZCompiler();
+function startCompiler() {
+    console.clear();
+    console.log("Z DİLİ DERLEYİCİSİ BAŞLATILDI: Lütfen açılan pencerede tüm .z dosyalarınızı seçin.");
+
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.accept = '.z'; 
+    input.multiple = true; 
+
+    input.addEventListener('change', (event) => {
+        const files = event.target.files;
+        if (files.length > 0) {
+            processSelectedFiles(files);
+        } else {
+            console.warn("Seçim iptal edildi.");
+        }
+        document.body.removeChild(input); 
+    });
+
+    input.style.display = 'none';
+    document.body.appendChild(input);
+    input.click();
+}
+
+startCompiler();
