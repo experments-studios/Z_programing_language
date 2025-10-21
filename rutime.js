@@ -18,6 +18,11 @@
 
         for (let i = 0; i < lines.length; i++) {
             const line = lines[i].trim();
+            
+            // Yorum satırlarını atla (Makro tanımı içinde olmadığı sürece)
+            if (!currentCommand && (line.startsWith('//') || line.startsWith('#'))) {
+                continue;
+            }
 
             if (line.startsWith('<command^crt>')) {
                 currentCommand = { definition: null, body: [] };
@@ -58,8 +63,6 @@
 
     /**
      * Makro kullanımını Z kod şablonuna genişletir.
-     * @param {string} line Genişletilecek komut satırı (Örn: console("merhaba"))
-     * @returns {string | null} Genişletilmiş Z kodu veya null (makro değilse/hata varsa)
      */
     function expandMacro(line) {
         const macroMatch = line.match(/^(\w+)\s*\(([^)]*)\)$/); 
@@ -72,8 +75,10 @@
         if (!macro) return null;
 
         let expandedCode = macro.template;
-        // Tırnak içindeki virgülleri koruyan Argüman ayırma (Güvenilirliği artırır)
-        const rawArgArray = rawArgs.split(/,(?=(?:(?:[^"]*"){2})*[^"]*$)/).map(a => a.trim());
+        
+        const rawArgArray = rawArgs.split(/,(?=(?:(?:[^"]*"){2})*[^"]*$)/)
+                                 .map(a => a.trim())
+                                 .filter(a => a.length > 0);
         
         // Pozisyonel eşleştirme yap
         macro.paramPlaceholders.forEach((placeholder, index) => {
@@ -96,36 +101,31 @@
         
         // Genişletme (Expansion) Aşaması
         let currentLines = codeWithMacros.split('\n').map(l => l.trim()).filter(l => l.length > 0);
-        let expandedLines = [];
         let madeExpansion = true;
 
-        // Bütün makrolar genişleyene kadar döngü
         while (madeExpansion) {
             madeExpansion = false;
-            expandedLines = [];
+            let nextLines = [];
             
             for (const line of currentLines) {
                 const expanded = expandMacro(line);
                 if (expanded) {
-                    // Makro genişledi, yeni satırları ekle
-                    expandedLines.push(...expanded.split('\n').map(l => l.trim()).filter(l => l.length > 0));
+                    nextLines.push(...expanded.split('\n').map(l => l.trim()).filter(l => l.length > 0));
                     madeExpansion = true;
                 } else {
-                    // Normal Z kodu satırı veya tanımsız komut
-                    expandedLines.push(line);
+                    nextLines.push(line);
                 }
             }
-            currentLines = expandedLines;
+            currentLines = nextLines;
         }
 
         // JS Kodu Üretme Aşaması
         let jsOutput = ''; 
         
+        // Başlangıç ve bitiş yorumları kaldırıldı.
         if (!isModule) {
-            jsOutput += `\n(function() { // ${fileName}\n`; 
-        } else {
-             jsOutput += `// MODÜL KODU: ${fileName}\n`;
-        }
+            jsOutput += `(function() {\n`; 
+        } 
 
         let inJsAddon = false;
 
@@ -206,11 +206,10 @@
                     const varName = setMatch[1].trim();
                     const value = setMatch[2].trim();
                     jsLine = `let ${varName} = ${value};`;
-                } else if (line.startsWith('//') || line.startsWith('#')) {
-                    jsLine = line; 
                 } else {
-                    // Makro genişletmesi tamamlanmış ama normal komutlara uymayan son hata.
-                    jsLine = `// HATA: Tanınmayan komut: ${line}`;
+                    // Hata satırları da kaldırıldı, sadece kod çalıştırılamayan satırları bırakıyoruz.
+                    // Makro genişlemesi bittiği için burası zaten bir hata olmalıdır.
+                    throw new Error(`DERLEME HATASI: Tanınmayan komut satırı: ${line}`);
                 }
             }
 
@@ -220,7 +219,7 @@
         }
         
         if (!isModule) {
-            jsOutput += `\n})();// ${fileName}\n`;
+            jsOutput += `})();\n`;
         }
 
         return jsOutput;
@@ -292,7 +291,7 @@
             lastCompiledCode = finalCompiledCode;
 
             console.log("--- DERLEME BAŞARILI ---");
-            console.log("ÇIKTI JS KODU:");
+            console.log("ÇIKTI JS KODU (Yorumsuz):");
             console.log(finalCompiledCode);
             console.log("--- ÇALIŞTIRMA SONUCU ---");
             eval(finalCompiledCode);
@@ -307,8 +306,8 @@
     // ZStart fonksiyonu
     window.ZStart = function() {
         console.clear();
-        console.log("Z DİLİ DERLEYİCİSİ BAŞLADI.");
-        console.log("Lütfen dosyaları seçin.");
+        console.log("Z DİLİ DERLEYİCİSİ YÜKLENDİ.");
+        console.log("Başlamak için Lütfen dosyaları seçin.");
 
         const input = document.createElement('input');
         input.type = 'file';
