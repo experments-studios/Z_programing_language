@@ -148,7 +148,7 @@
             else if (line.startsWith('<addon^js>')) { inJsAddon = false; continue; } 
             else if (inJsAddon) { jsOutput += line + '\n'; continue; }
             
-            // KOMUT EŞLEŞTİRME
+            E
             const errorIndexMatch = line.match(/^<error\^set\.index="([^"]+)">$/);
             const errorIncodeMatch = line.match(/^<error\^set\.incode="([^"]+)">$/);
             const alertMatch = line.match(/^<alert\^class="([^"]+)">$/);
@@ -200,9 +200,6 @@
         return jsOutput;
     }
     
-    // --------------------------------------------------------------------
-    // PROJE YÖNETİMİ
-    // --------------------------------------------------------------------
     
     window.Zinstall = function() {
         if (!lastCompiledCode) {
@@ -243,40 +240,40 @@
                         mainFileContent = content;
                     }
                 } catch (e) {
-                    console.error(`HATA: ${file.name} okunamadı.`, e);
+                    console.error(`error: ${file.name} `, e);
                     return;
                 }
             }
         }
         
         if (zFileCount === 0 || !mainFileContent) {
-            console.error("HATA: 'main.z' veya .z uzantılı dosya bulunamadı.");
+            console.error("ERROR: no file");
             return;
         }
 
         try {
-            console.log("Projeyi tek Z dosyasına birleştirme...");
+            console.log("Loading...");
             const bundledZCode = bundleProject('main.z');
             
             const finalCompiledCode = compileZLang(bundledZCode);
             lastCompiledCode = finalCompiledCode;
 
-            console.log("--- DERLEME BAŞARILI ---");
+            console.log(" file compiled");
             console.log(finalCompiledCode);
-            console.log("--- ÇALIŞTIRMA SONUCU ---");
+            console.log(" Z code");
             eval(finalCompiledCode);
             
-            console.log("Zinstall() ile indir.");
+            console.log("Zinstall()");
 
         } catch (error) {
-            console.error("KRİTİK HATA:", error.message);
+            console.error("ERROR:", error.message);
         }
     }
 
     window.ZStart = function() {
         console.clear();
-        console.log("%cZ DİLİ DERLEYİCİSİ BAŞLADI.", 'color: #00aaff; font-weight: bold;');
-        console.log("Lütfen dosyaları seçin.");
+        console.log("starting compiler", 'color: #00aaff; font-weight: bold;');
+        console.log("Z file");
 
         const input = document.createElement('input');
         input.type = 'file';
@@ -298,5 +295,6 @@
         input.click();
     };
 
-    console.log("%cZ Dili Derleyicisi Yüklendi. Başlamak için konsola ZStart() yazın.", 'color: #00aaff; font-weight: bold;');
+    console.log(" ZStart() ", 'color: #00aaff; font-weight: bold;');
 })();
+ 
