@@ -6,13 +6,12 @@
     let lastCompiledCode = ''; 
     let userCommands = {}; 
 
-    // Helper function: Escape special regex characters
     function escapeRegExp(string) {
         return string.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'); 
     }
 
     // --------------------------------------------------------------------
-    // MACRO DEFINITION AND PARSING FUNCTION
+    // MAKRO TANIMLAMA ve PARS ETME FONKSİYONU
     // --------------------------------------------------------------------
     function extractUserCommands(zCode) {
         const lines = zCode.split('\n');
@@ -23,7 +22,6 @@
 
         for (let i = 0; i < lines.length; i++) {
             const line = lines[i].trim();
-            // Skip comments outside macro definition blocks
             if (!currentCommand && (line.startsWith('//') || line.startsWith('#'))) continue;
 
             if (line.startsWith('<command^crt>')) { currentCommand = { definition: null, body: [] };
@@ -53,9 +51,6 @@
         return cleanZCodeLines.join('\n');
     }
 
-    /**
-     * Expands a macro call into its Z code template.
-     */
     function expandMacro(line) {
         const macroMatch = line.match(/^(\w+)\s*\(([^)]*)\)$/); 
         if (!macroMatch) return null;
@@ -68,7 +63,6 @@
 
         let expandedCode = macro.template;
         
-        // Robust argument parsing: Ignores commas within quoted strings.
         const rawArgArray = rawArgs.split(/,(?=(?:(?:[^"]*"){2})*[^"]*$)/)
                                  .map(a => a.trim())
                                  .filter(a => a.length > 0);
@@ -76,8 +70,6 @@
         macro.paramPlaceholders.forEach((placeholder, index) => {
             if (index < rawArgArray.length) {
                 const argValue = rawArgArray[index];
-                
-                // Replace the exact placeholder name with the argument value.
                 const regex = new RegExp(escapeRegExp(placeholder), 'g');
                 expandedCode = expandedCode.replace(regex, argValue);
             }
@@ -87,17 +79,17 @@
     }
     
     // --------------------------------------------------------------------
-    // PROJECT BUNDLING FUNCTION
+    // PROJE BİRLEŞTİRME FONKSİYONU
     // --------------------------------------------------------------------
     function bundleProject(fileName, visited = new Set()) {
         if (visited.has(fileName)) {
-            throw new Error(`IMPORT LOOP: File '${fileName}' has already been imported.`);
+            throw new Error(`IMPORT DÖNGÜSÜ: '${fileName}' zaten içe aktarılmış.`);
         }
         visited.add(fileName);
 
         const zCode = projectFiles[fileName];
         if (!zCode) {
-            throw new Error(`IMPORT ERROR: File '${fileName}' not found.`);
+            throw new Error(`IMPORT HATA: '${fileName}' bulunamadı.`);
         }
 
         const lines = zCode.split('\n');
@@ -109,7 +101,6 @@
 
             if (importMatch) {
                 const libFileName = importMatch[1];
-                // Recursively bundle the imported module
                 const importedCode = bundleProject(libFileName, visited);
                 bundledCode.push(importedCode);
             } else {
@@ -122,13 +113,11 @@
     }
 
     // --------------------------------------------------------------------
-    // Z LANGUAGE COMPILER (Single Pass)
+    // Z DİLİ DERLEYİCİSİ
     // --------------------------------------------------------------------
     function compileZLang(zCode) {
-        // 1. Extract all macro definitions globally from the bundled code.
         const codeWithMacros = extractUserCommands(zCode);
         
-        // 2. Macro Expansion Pass: Repeat until no more expansions occur.
         let currentLines = codeWithMacros.split('\n').map(l => l.trim()).filter(l => l.length > 0);
         let madeExpansion = true;
 
@@ -139,7 +128,6 @@
             for (const line of currentLines) {
                 const expanded = expandMacro(line);
                 if (expanded) {
-                    // Macro expanded, append new lines and loop again
                     nextLines.push(...expanded.split('\n').map(l => l.trim()).filter(l => l.length > 0));
                     madeExpansion = true;
                 } else {
@@ -149,19 +137,18 @@
             currentLines = nextLines;
         }
 
-        // 3. JS Code Generation Pass
         let jsOutput = `(function() {\n`; 
         let inJsAddon = false;
 
         for (const line of currentLines) {
             let jsLine = '';
 
-            // ADDON BLOCK HANDLING
+            // ADDON
             if (line.startsWith('<addon^index/set^js>')) { inJsAddon = true; continue; } 
             else if (line.startsWith('<addon^js>')) { inJsAddon = false; continue; } 
             else if (inJsAddon) { jsOutput += line + '\n'; continue; }
             
-            // COMMAND MATCHING
+            // KOMUT EŞLEŞTİRME
             const errorIndexMatch = line.match(/^<error\^set\.index="([^"]+)">$/);
             const errorIncodeMatch = line.match(/^<error\^set\.incode="([^"]+)">$/);
             const alertMatch = line.match(/^<alert\^class="([^"]+)">$/);
@@ -201,7 +188,7 @@
             } else if (setMatch) {
                 jsLine = `let ${setMatch[1].trim()} = ${setMatch[2].trim()};`;
             } else {
-                throw new Error(`COMPILATION ERROR: Unrecognized command line: ${line}`);
+                throw new Error(`DERLEME HATASI: Tanınmayan komut satırı: ${line}`);
             }
 
             if (jsLine) {
@@ -214,12 +201,12 @@
     }
     
     // --------------------------------------------------------------------
-    // PROJECT MANAGEMENT
+    // PROJE YÖNETİMİ
     // --------------------------------------------------------------------
     
     window.Zinstall = function() {
         if (!lastCompiledCode) {
-            console.error("ERROR: Compilation not performed.");
+            console.error("HATA: Derleme yapılmadı.");
             return;
         }
         const blob = new Blob([lastCompiledCode], {type: 'text/javascript;charset=utf-8'});
@@ -256,40 +243,40 @@
                         mainFileContent = content;
                     }
                 } catch (e) {
-                    console.error(`ERROR: Could not read file ${file.name}.`, e);
+                    console.error(`HATA: ${file.name} okunamadı.`, e);
                     return;
                 }
             }
         }
         
         if (zFileCount === 0 || !mainFileContent) {
-            console.error("ERROR: 'main.z' or any .z file not found.");
+            console.error("HATA: 'main.z' veya .z uzantılı dosya bulunamadı.");
             return;
         }
 
         try {
-            console.log("Bundling project into a single Z file...");
+            console.log("Projeyi tek Z dosyasına birleştirme...");
             const bundledZCode = bundleProject('main.z');
             
             const finalCompiledCode = compileZLang(bundledZCode);
             lastCompiledCode = finalCompiledCode;
 
-            console.log("--- COMPILATION SUCCESSFUL ---");
+            console.log("--- DERLEME BAŞARILI ---");
             console.log(finalCompiledCode);
-            console.log("--- EXECUTION RESULT ---");
+            console.log("--- ÇALIŞTIRMA SONUCU ---");
             eval(finalCompiledCode);
             
-            console.log("Use Zinstall() to download the output.");
+            console.log("Zinstall() ile indir.");
 
         } catch (error) {
-            console.error("CRITICAL ERROR:", error.message);
+            console.error("KRİTİK HATA:", error.message);
         }
     }
 
     window.ZStart = function() {
         console.clear();
-        console.log("%cZ Language Compiler STARTED.", 'color: #00aaff; font-weight: bold;');
-        console.log("Please select project files (.z files).");
+        console.log("%cZ DİLİ DERLEYİCİSİ BAŞLADI.", 'color: #00aaff; font-weight: bold;');
+        console.log("Lütfen dosyaları seçin.");
 
         const input = document.createElement('input');
         input.type = 'file';
@@ -311,9 +298,7 @@
         input.click();
     };
 
-    console.log("%cZ Language Compiler Loaded. Type ZStart() in the console to begin.", 'color: #00aaff; font-weight: bold;');
+    console.log("%cZ Dili Derleyicisi Yüklendi. Başlamak için konsola ZStart() yazın.", 'color: #00aaff; font-weight: bold;');
 })();
-    console.log(" ZStart() ", 'color: #00aaff; font-weight: bold;');
-})();
- 
+
 
