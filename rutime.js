@@ -6,6 +6,10 @@
     let lastCompiledCode = ''; 
     let userCommands = {}; 
 
+    function escapeRegExp(string) {
+        return string.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'); 
+    }
+
     // --------------------------------------------------------------------
     // MAKRO TANIMLAMA ve PARS ETME FONKSİYONU
     // --------------------------------------------------------------------
@@ -18,16 +22,10 @@
 
         for (let i = 0; i < lines.length; i++) {
             const line = lines[i].trim();
-            
-            // Yorum satırlarını atla (Makro tanımı içinde olmadığı sürece)
-            if (!currentCommand && (line.startsWith('//') || line.startsWith('#'))) {
-                continue;
-            }
+            if (!currentCommand && (line.startsWith('//') || line.startsWith('#'))) continue;
 
-            if (line.startsWith('<command^crt>')) {
-                currentCommand = { definition: null, body: [] };
-            } else if (currentCommand && line === '}') {
-                // Makro tanımının Z kodu kısmı başladı
+            if (line.startsWith('<command^crt>')) { currentCommand = { definition: null, body: [] };
+            } else if (currentCommand && line === '}') { 
             } else if (currentCommand && line.startsWith('<cmd^add>')) {
                 const definition = commandLines[0].trim();
                 const defMatch = definition.match(/^(\w+)\s*\(([^)]*)\)$/);
@@ -36,13 +34,11 @@
                     const macroName = defMatch[1];
                     const paramsString = defMatch[2];
                     const params = paramsString.split(',').map(p => p.trim());
-                    
                     fileUserCommands[macroName] = { 
                         paramPlaceholders: params,
                         template: commandLines.slice(1).join('\n').trim()
                     };
                 }
-                
                 currentCommand = null;
                 commandLines = [];
             } else if (currentCommand) {
@@ -51,19 +47,10 @@
                 cleanZCodeLines.push(lines[i]);
             }
         }
-        
         Object.assign(userCommands, fileUserCommands);
         return cleanZCodeLines.join('\n');
     }
 
-    // Yardımcı fonksiyon: Regex için özel karakterleri kaçırma
-    function escapeRegExp(string) {
-        return string.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'); 
-    }
-
-    /**
-     * Makro kullanımını Z kod şablonuna genişletir.
-     */
     function expandMacro(line) {
         const macroMatch = line.match(/^(\w+)\s*\(([^)]*)\)$/); 
         if (!macroMatch) return null;
@@ -80,7 +67,6 @@
                                  .map(a => a.trim())
                                  .filter(a => a.length > 0);
         
-        // Pozisyonel eşleştirme yap
         macro.paramPlaceholders.forEach((placeholder, index) => {
             if (index < rawArgArray.length) {
                 const argValue = rawArgArray[index];
@@ -91,15 +77,47 @@
 
         return expandedCode;
     }
+    
+    // --------------------------------------------------------------------
+    // PROJE BİRLEŞTİRME FONKSİYONU
+    // --------------------------------------------------------------------
+    function bundleProject(fileName, visited = new Set()) {
+        if (visited.has(fileName)) {
+            throw new Error(`IMPORT DÖNGÜSÜ: '${fileName}' zaten içe aktarılmış.`);
+        }
+        visited.add(fileName);
+
+        const zCode = projectFiles[fileName];
+        if (!zCode) {
+            throw new Error(`IMPORT HATA: '${fileName}' bulunamadı.`);
+        }
+
+        const lines = zCode.split('\n');
+        let bundledCode = [];
+
+        for (const line of lines) {
+            const trimmedLine = line.trim();
+            const importMatch = trimmedLine.match(/^<import\^z="([^"]+\.z)">$/);
+
+            if (importMatch) {
+                const libFileName = importMatch[1];
+                const importedCode = bundleProject(libFileName, visited);
+                bundledCode.push(importedCode);
+            } else {
+                bundledCode.push(line);
+            }
+        }
+        
+        visited.delete(fileName);
+        return bundledCode.join('\n');
+    }
 
     // --------------------------------------------------------------------
     // Z DİLİ DERLEYİCİSİ
     // --------------------------------------------------------------------
-    function compileZLang(zCode, fileName, isModule = false) {
-        // Makro tanımlarını çıkar ve temizlenmiş kodu al
+    function compileZLang(zCode) {
         const codeWithMacros = extractUserCommands(zCode);
         
-        // Genişletme (Expansion) Aşaması
         let currentLines = codeWithMacros.split('\n').map(l => l.trim()).filter(l => l.length > 0);
         let madeExpansion = true;
 
@@ -119,98 +137,58 @@
             currentLines = nextLines;
         }
 
-        // JS Kodu Üretme Aşaması
-        let jsOutput = ''; 
-        
-        // Başlangıç ve bitiş yorumları kaldırıldı.
-        if (!isModule) {
-            jsOutput += `(function() {\n`; 
-        } 
-
+        let jsOutput = `(function() {\n`; 
         let inJsAddon = false;
 
         for (const line of currentLines) {
             let jsLine = '';
 
-            // 1. ADDON İşleme
+            // ADDON
             if (line.startsWith('<addon^index/set^js>')) { inJsAddon = true; continue; } 
             else if (line.startsWith('<addon^js>')) { inJsAddon = false; continue; } 
             else if (inJsAddon) { jsOutput += line + '\n'; continue; }
             
-            // 2. NORMAL Z KOMUTLARI
-            
-            // PROMPT
+            // KOMUT EŞLEŞTİRME
+            const errorIndexMatch = line.match(/^<error\^set\.index="([^"]+)">$/);
+            const errorIncodeMatch = line.match(/^<error\^set\.incode="([^"]+)">$/);
+            const alertMatch = line.match(/^<alert\^class="([^"]+)">$/);
             const promptMatch = line.match(/^<prompt\^set\.index="([^"]+)"&başlık="([^"]+)">$/);
-            if (promptMatch) {
-                const varName = promptMatch[1];
-                const title = promptMatch[2];
-                jsLine = `let ${varName} = prompt("${title}");`;
-            }
+            const ifMatch = line.match(/^<if\^set\.incode="([^"]+)">$/);
+            const elseIfMatch = line.match(/^<else\^if\^set\.incode="([^"]+)">$/);
+            const forMatch = line.match(/^<for\^set\.incode="([^"]+)">$/);
+            const whileMatch = line.match(/^<while\^set\.incode="([^"]+)">$/);
+            const printIndexMatch = line.match(/^<print\^set\.index="([^"]+)">$/);
+            const incodeValue = line.match(/^<print\^set\.incode="([^"]+)">$/);
+            const setMatch = line.match(/^<set\^(\w+)\s*=\s*(.*)$/);
             
-            // IMPORT İŞLEMİ 
-            else if (line.startsWith('<import^z=')) {
-                const importMatch = line.match(/^<import\^z="([^"]+\.z)">$/);
-                if (importMatch) {
-                    const libFileName = importMatch[1];
-                    let moduleJsCode = compiledModulesCache[libFileName];
-                    
-                    if (!moduleJsCode) {
-                        const moduleZCode = projectFiles[libFileName];
-                        if (!moduleZCode) {
-                            throw new Error(`IMPORT HATA: '${libFileName}' bulunamadı.`);
-                        }
-                        moduleJsCode = compileZLang(moduleZCode, libFileName, true);
-                        compiledModulesCache[libFileName] = moduleJsCode;
-                    }
-                    
-                    jsOutput += moduleJsCode + '\n';
-                }
-            } 
-            
-            // KONTROL YAPILARI VE TEMEL Z KOMUTLARI
-            else if (line.startsWith('<if^set.incode=')) {
-                const match = line.match(/^<if\^set\.incode="([^"]+)">$/);
-                jsLine = `if (${match[1]}) {`;
-            }
-            else if (line.startsWith('<else^if^set.incode=')) {
-                const match = line.match(/^<else\^if\^set\.incode="([^"]+)">$/);
-                jsLine = `} else if (${match[1]}) {`;
-            }
-            else if (line === '<else^set>') {
+            if (errorIndexMatch) {
+                jsLine = `console.error("${errorIndexMatch[1]}");`;
+            } else if (errorIncodeMatch) {
+                jsLine = `console.error(${errorIncodeMatch[1]});`;
+            } else if (alertMatch) {
+                jsLine = `alert("${alertMatch[1]}");`;
+            } else if (promptMatch) {
+                jsLine = `let ${promptMatch[1]} = prompt("${promptMatch[2]}");`;
+            } else if (ifMatch) {
+                jsLine = `if (${ifMatch[1]}) {`;
+            } else if (elseIfMatch) {
+                jsLine = `} else if (${elseIfMatch[1]}) {`;
+            } else if (line === '<else^set>') {
                 jsLine = `} else {`;
-            }
-            else if (line === '<end^if>') {
+            } else if (line === '<end^if>' || line === '<end^loop>') {
                 jsLine = `}`;
-            }
-            else if (line.startsWith('<for^set.incode=')) {
-                const match = line.match(/^<for\^set\.incode="([^"]+)">$/);
-                jsLine = `for (${match[1]}) {`;
-            }
-            else if (line.startsWith('<while^set.incode=')) {
-                const match = line.match(/^<while\^set\.incode="([^"]+)">$/);
-                jsLine = `while (${match[1]}) {`;
-            }
-            else if (line === '<end^loop>') {
-                jsLine = `}`;
-            }
-            else {
-                const printIndexMatch = line.match(/^<print\^set\.index="([^"]+)">$/);
-                const incodeValue = line.match(/^<print\^set\.incode="([^"]+)">$/);
-                const setMatch = line.match(/^<set\^(\w+)\s*=\s*(.*)$/);
-                
-                if (printIndexMatch) {
-                    jsLine = `console.log("${printIndexMatch[1]}");`;
-                } else if (incodeValue) {
-                    jsLine = `console.log(${incodeValue[1]});`;
-                } else if (setMatch) {
-                    const varName = setMatch[1].trim();
-                    const value = setMatch[2].trim();
-                    jsLine = `let ${varName} = ${value};`;
-                } else {
-                    // Hata satırları da kaldırıldı, sadece kod çalıştırılamayan satırları bırakıyoruz.
-                    // Makro genişlemesi bittiği için burası zaten bir hata olmalıdır.
-                    throw new Error(`DERLEME HATASI: Tanınmayan komut satırı: ${line}`);
-                }
+            } else if (forMatch) {
+                jsLine = `for (${forMatch[1]}) {`;
+            } else if (whileMatch) {
+                jsLine = `while (${whileMatch[1]}) {`;
+            } else if (printIndexMatch) {
+                jsLine = `console.log("${printIndexMatch[1]}");`;
+            } else if (incodeValue) {
+                jsLine = `console.log(${incodeValue[1]});`;
+            } else if (setMatch) {
+                jsLine = `let ${setMatch[1].trim()} = ${setMatch[2].trim()};`;
+            } else {
+                throw new Error(`DERLEME HATASI: Tanınmayan komut satırı: ${line}`);
             }
 
             if (jsLine) {
@@ -218,16 +196,14 @@
             }
         }
         
-        if (!isModule) {
-            jsOutput += `})();\n`;
-        }
-
+        jsOutput += `})();\n`;
         return jsOutput;
     }
     
-    // Zinstall, processSelectedFiles ve ZStart fonksiyonları aynı kalır.
+    // --------------------------------------------------------------------
+    // PROJE YÖNETİMİ
+    // --------------------------------------------------------------------
     
-    // Zinstall fonksiyonu
     window.Zinstall = function() {
         if (!lastCompiledCode) {
             console.error("HATA: Derleme yapılmadı.");
@@ -243,12 +219,10 @@
         a.click();
         document.body.removeChild(a);
         URL.revokeObjectURL(url); 
-        console.log(`'zlang_output.js' indirildi.`);
     };
 
     async function processSelectedFiles(files) {
         projectFiles = {};
-        compiledModulesCache = {};
         userCommands = {}; 
         
         let mainFileContent = null;
@@ -275,23 +249,19 @@
             }
         }
         
-        if (zFileCount === 0) {
-            console.error("HATA: Hiçbir .z uzantılı dosya seçilmedi.");
-            return;
-        }
-
-        if (!mainFileContent) {
-            console.error("HATA: 'main.z' bulunamadı.");
+        if (zFileCount === 0 || !mainFileContent) {
+            console.error("HATA: 'main.z' veya .z uzantılı dosya bulunamadı.");
             return;
         }
 
         try {
-            // Tüm makrolar derleme başlangıcında toplanır ve Genişletme Aşaması çalışır.
-            const finalCompiledCode = compileZLang(mainFileContent, 'main.z', false);
+            console.log("Projeyi tek Z dosyasına birleştirme...");
+            const bundledZCode = bundleProject('main.z');
+            
+            const finalCompiledCode = compileZLang(bundledZCode);
             lastCompiledCode = finalCompiledCode;
 
             console.log("--- DERLEME BAŞARILI ---");
-            console.log("ÇIKTI JS KODU (Yorumsuz):");
             console.log(finalCompiledCode);
             console.log("--- ÇALIŞTIRMA SONUCU ---");
             eval(finalCompiledCode);
@@ -303,11 +273,10 @@
         }
     }
 
-    // ZStart fonksiyonu
     window.ZStart = function() {
         console.clear();
-        console.log("Z DİLİ DERLEYİCİSİ YÜKLENDİ.");
-        console.log("Başlamak için Lütfen dosyaları seçin.");
+        console.log("%cZ DİLİ DERLEYİCİSİ BAŞLADI.", 'color: #00aaff; font-weight: bold;');
+        console.log("Lütfen dosyaları seçin.");
 
         const input = document.createElement('input');
         input.type = 'file';
@@ -329,6 +298,5 @@
         input.click();
     };
 
-    // Konsola bilgilendirme mesajı
     console.log("%cZ Dili Derleyicisi Yüklendi. Başlamak için konsola ZStart() yazın.", 'color: #00aaff; font-weight: bold;');
 })();
